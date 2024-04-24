@@ -1,2 +1,0 @@
-def kmeans():
-    print("importado")
