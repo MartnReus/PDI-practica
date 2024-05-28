@@ -11,7 +11,8 @@ kernel_size = 3
 
 # Load image from webcam
 image = cv2.imread("images/texto1.jpg",cv2.IMREAD_COLOR)
-image = image[0:2400,800:2800,:]
+image = cv2.imread("images/textos/chart.JPG")
+# image = image[0:2400,800:2800,:]
 
 # Convert to grayscale
 gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
@@ -30,9 +31,9 @@ def CannyThreshold(val):
     mask = detected_edges != 0
     dst = image  * (mask[:,:,None].astype(image.dtype))
 
-    tessdata_dir_config = r'--tessdata-dir "/usr/share/tessdata/"'
-    text = pytesseract.image_to_string(dst,config=tessdata_dir_config,lang='spa')
-    print("Recognized Text:", text)
+    # tessdata_dir_config = r'--tessdata-dir "/usr/share/tessdata/"'
+    # text = pytesseract.image_to_string(dst,config=tessdata_dir_config,lang='spa')
+    # print("Recognized Text:", text)
 
     cv2.imshow(window_name, dst)
     return dst
