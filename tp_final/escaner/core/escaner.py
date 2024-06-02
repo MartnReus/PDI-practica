@@ -2,7 +2,12 @@ import cv2
 from cv2.gapi import dilate
 import numpy as np
 import pytesseract
+import easyocr
+from doctr.io import DocumentFile
+from doctr.models import ocr_predictor
 import matplotlib.pyplot as plt
+import torchmetrics.text 
+import torch
 
 
 class Escaner:
@@ -13,7 +18,42 @@ class Escaner:
         pass
 
 
-    def show_scaned_image(self,path):
+    def ocr_read(self, img,ocr='tesseract'):
+        recognized_text = ""
+
+        if ocr == 'tesseract':
+        # Tesseract OCR
+            #tessdata_dir_config = r'C:\Program Files\Tesseract-OCR\tessdata'
+            #recognized_text = pytesseract.image_to_string(dilated_image,config=tessdata_dir_config,lang='eng')
+            tessdata_dir_config = r'--tessdata-dir "/usr/share/tessdata/"'
+            recognized_text = pytesseract.image_to_string(img,config=tessdata_dir_config,lang='eng')
+        elif ocr == 'easyocr':
+        # Easy OCR
+            reader = easyocr.Reader(['es'], gpu=False) # this needs to run only once to load the model into memory
+            recognized_text = reader.readtext(img, detail=0)
+            recognized_text = ' '.join(recognized_text)
+        elif ocr == 'doctr':
+        # docTR
+            # return
+            model = ocr_predictor('db_resnet50', 'crnn_vgg16_bn', pretrained=True)
+            result = model([img])
+            recognized_text = result.render()
+
+
+        return recognized_text
+
+
+    def metrics(self,output,real_text,metric='cer'):
+        val = -1
+        if metric == 'cer':
+            cer = torchmetrics.text.CharErrorRate()
+            val = cer(output, real_text)
+        elif metric == 'wer':
+            wer = torchmetrics.text.WordErrorRate()
+            val = wer(output, real_text)
+        return val
+
+    def show_scaned_image(self,path,morph=False):
         image = cv2.imread(path)
         thr = 100
         thr2 = 700
@@ -24,9 +64,10 @@ class Escaner:
         # timg = np.transpose(timg)
         # image = np.flip(timg,[0])
 
+
         scanned_image = self.process_frame(image,fix_position=True,thr2=thr2,thr=thr)
         while True:
-            print("Trying again")
+            # print("Trying again")
             thr -= 5
             thr2 -=25
             scanned_image = self.process_frame(image,fix_position=True,thr2=thr2,thr=thr)
@@ -35,18 +76,20 @@ class Escaner:
         # Convert to grayscale
         gray_image = cv2.cvtColor(scanned_image, cv2.COLOR_BGR2GRAY)
 
-        blurred_image = cv2.GaussianBlur(gray_image, (5, 5), 0)
+        # blurred_image = cv2.GaussianBlur(gray_image, (5, 5), 0)
+        blurred_image = cv2.GaussianBlur(gray_image, (3, 3), 0)
 
-        binary_image = cv2.adaptiveThreshold(blurred_image, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+        # binary_image = cv2.adaptiveThreshold(blurred_image, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 11, 2)
+        binary_image = blurred_image
 
         kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
         dilated_image = binary_image
         
-        dilated_image = cv2.medianBlur(binary_image, 7)
+        dilated_image = cv2.medianBlur(binary_image, 5)
 
-        # grab the dimensions of the image and calculate the center of the
-# image
-
+        # plt.imshow(dilated_image, cmap='gray')
+        # plt.axis('off')  # Hide the axis
+        # plt.show()  
 
         f = np.fft.fft2(dilated_image)
         fshift = np.fft.fftshift(f)
@@ -55,38 +98,58 @@ class Escaner:
         (h, w) = dilated_image.shape[:2]
         center = (w // 2, h // 2)
 
-        x_mag = magnitude_spectrum[center[1],center[0]-5:center[0]]
-        y_mag = magnitude_spectrum[center[1]-5:center[1],center[0]]
+        cant_x = np.floor(center[0]*0.2).astype(np.uint)
+        cant_y = np.floor(center[1]*0.2).astype(np.uint)
+
+        print(f"Cantidad en x: {cant_x} - Cantidad en y: {cant_y}")
+
+        x_mag = magnitude_spectrum[center[1],center[0]-int(cant_x):center[0]]
+        y_mag = magnitude_spectrum[center[1]-int(cant_y):center[1],center[0]]
 
         x_mag_avg = np.mean(x_mag)
         y_mag_avg = np.mean(y_mag)
 
         print(f"Mag en x: {x_mag_avg} -  Mag en y: {y_mag_avg}")
+
+        # plt.figure()
+        # plt.subplot(121)
+        # plt.imshow(dilated_image, cmap='gray')
+        # plt.title('Image')
+        # plt.axis('off')
+        #
+        # plt.subplot(122)
         # plt.imshow(magnitude_spectrum, cmap='gray')
         # plt.title('Magnitude Spectrum')
+        # plt.axis('off')
+        #
         # plt.show()
 
         if x_mag_avg > y_mag_avg:
             timg = np.transpose(dilated_image.copy())
             dilated_image = np.flip(timg,[1])
 
-        # dilated_image = cv2.morphologyEx(binary_image, cv2.MORPH_CLOSE, kernel,iterations=1)
-        # dilated_image = cv2.dilate(binary_image, kernel, iterations=1)
-        # dilated_image = cv2.erode(binary_image, kernel, iterations=1)
+        if morph:
+            print("Morphing...")
+            # dilated_image = cv2.dilate(binary_image, kernel, iterations=1)
+            dilated_image = cv2.morphologyEx(dilated_image, cv2.MORPH_CLOSE, kernel,iterations=1)
+            # dilated_image = cv2.erode(binary_image, kernel, iterations=1)
 
 
-        window_name = "Imagen Rotada"
-        cv2.namedWindow(window_name,cv2.WINDOW_NORMAL)
-        cv2.imshow(window_name, dilated_image)
-        cv2.waitKey(0)
 
-        cv2.destroyAllWindows()
-        
-        recognized_text = ""
-        tessdata_dir_config = r'--tessdata-dir "/usr/share/tessdata/"'
-        recognized_text = pytesseract.image_to_string(dilated_image,config=tessdata_dir_config,lang='spa')
 
-        return recognized_text
+        original_image = cv2.cvtColor(image,cv2.COLOR_BGR2RGB) 
+        # plt.figure()
+        # plt.subplot(121)
+        # plt.imshow(original_image)
+        # plt.axis('off')  # Hide the axis
+        #
+        # plt.subplot(122)
+        # plt.imshow(dilated_image, cmap='gray')
+        # plt.axis('off')  # Hide the axis
+        # plt.show()
+
+        # return recognized_text
+        return dilated_image
 
 
     def load_video(self, path,save_path):
@@ -113,9 +176,9 @@ class Escaner:
     def process_frame(self,frame,thr=30,thr2=200, fix_position=False):
         image = frame
 
-        ratio = image.shape[0] / 500.0
+        # ratio = image.shape[0] / 500.0
         orig = image.copy()
-        image = cv2.resize(image, (int(image.shape[1] / ratio), 500))
+        # image = cv2.resize(image, (int(image.shape[1] / ratio), 500))
         
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
         gray = cv2.GaussianBlur(gray, (5, 5), 0)
@@ -169,8 +232,9 @@ class Escaner:
         if screenCnt is None:
             return 1
 
-        warped = self.four_point_transform(orig, screenCnt.reshape(4, 2) * ratio)
-        warped = cv2.GaussianBlur(warped, (3, 3), 0)
+        print(f'screenCnt: {screenCnt.shape}')
+        warped = self.four_point_transform(orig, screenCnt.reshape(4, 2))
+        # warped = cv2.GaussianBlur(warped, (3, 3), 0)
 
 
         return warped
@@ -185,9 +249,9 @@ class Escaner:
         rect[1] = pts[np.argmin(diff)]
         rect[3] = pts[np.argmax(diff)]
 
-        print(f"Puntos a orderar: ${pts}")
-        print(f's: ${s} \ndiff: ${diff}')
-        print(f"Rect: ${rect}")
+        # print(f"Puntos a orderar: ${pts}")
+        # print(f's: ${s} \ndiff: ${diff}')
+        # print(f"Rect: ${rect}")
         
         return rect
 
